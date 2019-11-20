@@ -218,7 +218,7 @@ function handleMethod(xml) {
   });
 }
 
-function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
+function listenForConnectionRequests(serialNumber, acsUrlOptions, connectionRequestUsername, connectionRequestPassword, callback) {
   let ip, port;
   // Start a dummy socket to get the used local ip
   let socket = net.createConnection({
@@ -236,8 +236,16 @@ function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
     const connectionRequestUrl = `http://${ip}:${port}/`;
 
     const httpServer = http.createServer((_req, res) => {
-      console.log(`Simulator ${serialNumber} got connection request`);
-      res.end();
+      var userpass = new Buffer((_req.headers.authorization || '').split(' ')[1] || '', 'base64').toString();
+
+      if (userpass !== connectionRequestUsername+":"+connectionRequestPassword) {
+          res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="nope"' });
+          res.end('HTTP Error 401 Unauthorized: Access is denied');
+          console.log(`Simulator ${serialNumber} got connection request with invalid credentials`);
+          return;
+      } else {
+        console.log(`Simulator ${serialNumber} got connection request`);
+        res.end();
         // A session is ongoing when nextInformTimeout === null
         if (nextInformTimeout === null) pendingInform = true;
         else {
@@ -246,6 +254,7 @@ function listenForConnectionRequests(serialNumber, acsUrlOptions, callback) {
             startSession("6 CONNECTION REQUEST");
           }, 0);
         }
+      }
     });
 
     httpServer.listen(port, ip, err => {
@@ -276,13 +285,16 @@ function start(dataModel, serialNumber, acsUrl) {
     password = device["InternetGatewayDevice.ManagementServer.Password"][1];
   }
 
+  let connectionRequestUsername = device["InternetGatewayDevice.ManagementServer.ConnectionRequestUsername"][1];
+  let connectionRequestPassword = device["InternetGatewayDevice.ManagementServer.ConnectionRequestPassword"][1];
+
   basicAuth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
 
   requestOptions = require("url").parse(acsUrl);
   http = require(requestOptions.protocol.slice(0, -1));
   httpAgent = new http.Agent({keepAlive: true, maxSockets: 1});
 
-  listenForConnectionRequests(serialNumber, requestOptions, (err, connectionRequestUrl) => {
+  listenForConnectionRequests(serialNumber, requestOptions, connectionRequestUsername, connectionRequestPassword, (err, connectionRequestUrl) => {
     if (err) throw err;
     if (device["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"]) {
       device["InternetGatewayDevice.ManagementServer.ConnectionRequestURL"][1] = connectionRequestUrl;
